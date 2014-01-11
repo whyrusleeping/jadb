@@ -88,6 +88,7 @@ func (col *Collection) cacheKey(id string) I {
 	dec := gob.NewDecoder(fi)
 	dec.Decode(v)
 	col.cache[id] = v
+	fi.Close()
 	return v
 }
 
@@ -110,6 +111,7 @@ func (col *Collection) writeDoc(o I) error {
 	if err != nil {
 		return err
 	}
+	defer fi.Close()
 	//NOTE: this is probably slow as shit, constructing gob encoders
 	//is pricey, find a better way
 	enc := gob.NewEncoder(fi)
