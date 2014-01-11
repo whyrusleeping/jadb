@@ -2,9 +2,11 @@ package jadb
 
 import (
 	"sync"
+	"io"
 	"os"
 	"encoding/gob"
 	"bufio"
+	"bytes"
 )
 
 type I interface {
@@ -20,6 +22,21 @@ type Collection struct {
 	halt chan bool
 
 	lock sync.RWMutex
+
+	enc *gob.Encoder
+	encwrite *WriteForwarder
+}
+
+type WriteForwarder struct {
+	w io.Writer
+}
+
+func (w *WriteForwarder) Write(b []byte) (int, error) {
+	return w.w.Write(b)
+}
+
+func (w *WriteForwarder) SetTarget(ntarget io.Writer) {
+	w.w = ntarget
 }
 
 type SomnDB struct {
@@ -50,6 +67,8 @@ func (db *SomnDB) Collection(name string) *Collection {
 	os.Mkdir(nc.directory, os.ModeDir | 1023)
 	db.collections[name] = nc
 
+	nc.encwrite = new(WriteForwarder)
+	nc.enc = gob.NewEncoder(nc.encwrite)
 	nc.readStoredKeys()
 	go nc.syncRoutine()
 	return nc
@@ -114,8 +133,8 @@ func (col *Collection) writeDoc(o I) error {
 	defer fi.Close()
 	//NOTE: this is probably slow as shit, constructing gob encoders
 	//is pricey, find a better way
-	enc := gob.NewEncoder(fi)
-	return enc.Encode(o)
+	col.encwrite.SetTarget(fi)
+	return col.enc.Encode(o)
 }
 
 func (col *Collection) syncRoutine() {
