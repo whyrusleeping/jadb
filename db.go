@@ -6,7 +6,6 @@ import (
 	"os"
 	"encoding/gob"
 	"bufio"
-	"bytes"
 )
 
 type I interface {
