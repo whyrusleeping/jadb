@@ -14,6 +14,7 @@ type Collection struct {
 	retch chan I
 	savech chan I
 	halt chan bool
+	finished chan bool
 
 	lock sync.RWMutex
 
@@ -33,6 +34,15 @@ func (col *Collection) readStoredKeys() error {
 		col.cache[scan.Text()] = nil
 	}
 	return nil
+}
+
+func (col *Collection) cleanup() {
+	col.halt <- true
+	<-col.finished
+	err := col.writeKeyFile()
+	if err != nil {
+		panic("Error writing key file!")
+	}
 }
 
 //Loads the value for the given key from the disk and caches it in memory
@@ -65,6 +75,19 @@ func (col *Collection) FindByID(id string) I {
 	return v
 }
 
+//This is very bad, but ill make it better later.
+func (col *Collection) writeKeyFile() error {
+	path := col.directory + "/.keys"
+	fi, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	for i,_ := range col.cache {
+		fi.Write([]byte(i + "\n"))
+	}
+	return nil
+}
+
 func (col *Collection) writeDoc(o I) error {
 	path := col.directory + "/" + o.GetID()
 	fi, err := os.Create(path)
@@ -91,6 +114,7 @@ func (col *Collection) syncRoutine() {
 					go func() {col.halt <- sig}()
 					continue
 				} else {
+					col.finished <-true
 					break
 				}
 		}
