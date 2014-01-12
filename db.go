@@ -7,6 +7,7 @@ import (
 
 type I interface {
 	GetID() string
+	New() I
 }
 
 type SomnDB struct {
@@ -22,7 +23,7 @@ func MakeSomnDB(dir string) *SomnDB {
 	return db
 }
 
-func (db *SomnDB) Collection(name string) *Collection {
+func (db *SomnDB) Collection(name string, template I) *Collection {
 	c, ok := db.collections[name]
 	if ok {
 		return c
@@ -33,7 +34,9 @@ func (db *SomnDB) Collection(name string) *Collection {
 	nc.retch = make(chan I)
 	nc.savech = make(chan I)
 	nc.halt = make(chan bool)
+	nc.finished = make(chan bool)
 	nc.directory = db.directory + "/" + name
+	nc.template = template
 	os.Mkdir(nc.directory, os.ModeDir | 1023)
 	db.collections[name] = nc
 
@@ -49,7 +52,7 @@ func (db *SomnDB) Close() {
 		//recovered from panic, now lets clean up
 	}
 	for _,v := range db.collections {
-		v.halt <- true
+		v.cleanup()
 	}
 }
 

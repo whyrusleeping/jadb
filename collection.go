@@ -4,6 +4,7 @@ import (
 	"sync"
 	"encoding/gob"
 	"os"
+	"fmt"
 	"bufio"
 )
 
@@ -20,6 +21,7 @@ type Collection struct {
 
 	enc *gob.Encoder
 	encwrite *WriteForwarder
+	template I
 }
 
 func (col *Collection) readStoredKeys() error {
@@ -41,7 +43,7 @@ func (col *Collection) cleanup() {
 	<-col.finished
 	err := col.writeKeyFile()
 	if err != nil {
-		panic("Error writing key file!")
+		fmt.Println("Error writing key file!")
 	}
 }
 
@@ -51,12 +53,21 @@ func (col *Collection) cacheKey(id string) I {
 	fi, err := os.Open(path)
 	if err != nil {
 		//TODO: handle error?
+		fmt.Println("Error opening file...")
+		fmt.Println(err)
 		return nil
 	}
 
-	var v I
+	v := col.template.New()
 	dec := gob.NewDecoder(fi)
-	dec.Decode(v)
+	err = dec.Decode(v)
+	if err != nil {
+		fmt.Println("Decode Failed!!")
+		fmt.Println(err)
+	}
+	if v == nil {
+		fmt.Println("Decoding returned nil value...")
+	}
 	col.cache[id] = v
 	fi.Close()
 	return v
@@ -70,6 +81,9 @@ func (col *Collection) FindByID(id string) I {
 	}
 	if v == nil {
 		v = col.cacheKey(id)
+		if v == nil {
+			fmt.Println("caching failed...")
+		}
 	}
 	col.lock.RUnlock()
 	return v
@@ -95,8 +109,6 @@ func (col *Collection) writeDoc(o I) error {
 		return err
 	}
 	defer fi.Close()
-	//NOTE: this is probably slow as shit, constructing gob encoders
-	//is pricey, find a better way
 	col.encwrite.SetTarget(fi)
 	return col.enc.Encode(o)
 }
