@@ -2,10 +2,11 @@ package jadb
 
 import (
 	"sync"
-	"encoding/gob"
+	"encoding/json"
+	"io"
 	"os"
 	"fmt"
-	"bufio"
+	"compress/gzip"
 )
 
 type Collection struct {
@@ -17,8 +18,6 @@ type Collection struct {
 
 	lock sync.RWMutex
 
-	enc *gob.Encoder
-	encwrite *WriteForwarder
 	template I
 }
 
@@ -29,13 +28,26 @@ func (col *Collection) readStoredKeys() error {
 		return err
 	}
 
-	scan := bufio.NewScanner(fi)
-	for scan.Scan() {
-		col.cache[scan.Text()] = nil
+	num := make([]byte, 2)
+	buf := make([]byte, 512)
+	for {
+		_, err := fi.Read(num)
+		if err == io.EOF {
+			break
+		}
+		l := (int(num[0]) << 8) + int(num[1])
+		if l > cap(buf) {
+			buf = buf[:cap(buf)]
+			buf = append(buf, make([]byte, (l - len(buf)) * 2)...)
+		}
+		buf = buf[:l]
+		fi.Read(buf)
+		col.cache[string(buf)] = nil
 	}
 	return nil
 }
 
+//Wait for all disk writes to finish and then write out final key file
 func (col *Collection) cleanup() {
 	col.halt <- true
 	<-col.finished
@@ -56,17 +68,26 @@ func (col *Collection) cacheKey(id string) I {
 		return nil
 	}
 
+	zip, err := gzip.NewReader(fi)
+	if err != nil {
+		//TODO: handle this error too
+		fmt.Println(err)
+		return nil
+	}
+
 	v := col.template.New()
-	dec := gob.NewDecoder(fi)
+	dec := json.NewDecoder(zip)
 	err = dec.Decode(v)
 	if err != nil {
-		fmt.Println("Decode Failed!!")
-		fmt.Println(err)
+		//TODO: more handling
+		panic(err)
 	}
 	if v == nil {
+		//TODO: handle handle handle
 		fmt.Println("Decoding returned nil value...")
 	}
 	col.cache[id] = v
+	zip.Close()
 	fi.Close()
 	return v
 }
@@ -88,6 +109,8 @@ func (col *Collection) FindByID(id string) I {
 }
 
 //This is very bad, but ill make it better later.
+//if there are millions of keys, we read in all of them
+//and that might be unecessary.
 func (col *Collection) writeKeyFile() error {
 	path := col.directory + "/.keys"
 	fi, err := os.Create(path)
@@ -95,7 +118,8 @@ func (col *Collection) writeKeyFile() error {
 		return err
 	}
 	for i,_ := range col.cache {
-		fi.Write([]byte(i + "\n"))
+		fi.Write([]byte{byte(len(i)/256), byte(len(i) % 256)})
+		fi.Write([]byte(i))
 	}
 	return nil
 }
@@ -106,11 +130,16 @@ func (col *Collection) writeDoc(o I) error {
 	if err != nil {
 		return err
 	}
-	defer fi.Close()
-	col.encwrite.SetTarget(fi)
-	return col.enc.Encode(o)
+	zip := gzip.NewWriter(fi)
+	enc := json.NewEncoder(zip)
+	err = enc.Encode(o)
+	zip.Close()
+	fi.Close()
+	return err
 }
 
+//Do all disk writes in a separate thread, and in the order
+//that they are queued. 
 func (col *Collection) syncRoutine() {
 	for {
 		select {

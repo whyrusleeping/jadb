@@ -1,7 +1,6 @@
 package jadb
 
 import (
-	"github.com/whyrusleeping/jadb"
 	"os"
 	"fmt"
 	"testing"
@@ -20,7 +19,7 @@ func (o *MyObj) GetID() string {
 	return o.Value
 }
 
-func (o *MyObj) New() jadb.I {
+func (o *MyObj) New() I {
 	return new(MyObj)
 }
 
@@ -43,7 +42,7 @@ func RandObj() *MyObj {
 }
 
 func TestBasic(t *testing.T) {
-	db := jadb.MakeSomnDB("testData")
+	db := MakeSomnDB("testData")
 	col := db.Collection("objects", new(MyObj))
 	o := RandObj()
 	col.Save(o)
@@ -56,7 +55,7 @@ func TestBasic(t *testing.T) {
 	db.Close()
 
 	//Test cold recall
-	db = jadb.MakeSomnDB("testData")
+	db = MakeSomnDB("testData")
 	col = db.Collection("objects", new(MyObj))
 	val := col.FindByID(o.GetID())
 	if val == nil {
@@ -66,6 +65,34 @@ func TestBasic(t *testing.T) {
 	if !o.Equals(b) {
 		t.Fail()
 	}
+	os.RemoveAll("testData")
+}
+
+func TestMany(t *testing.T) {
+	db := MakeSomnDB("testData")
+	col := db.Collection("objects", new(MyObj))
+	var list []*MyObj
+	for i := 0; i < 500; i++ {
+		o := RandObj()
+		col.Save(o)
+		list = append(list, o)
+	}
+	db.Close()
+
+	//Test cold recall
+	db = MakeSomnDB("testData")
+	col = db.Collection("objects", new(MyObj))
+	for _,v := range list {
+		val := col.FindByID(v.GetID())
+		if val == nil {
+			t.Fatalf("Could not reload from disk.")
+		}
+		b := val.(*MyObj)
+		if !v.Equals(b) {
+			t.Fail()
+		}
+	}
+	os.RemoveAll("testData")
 }
 
 func BenchmarkSaving(b *testing.B) {
@@ -74,7 +101,7 @@ func BenchmarkSaving(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		objs = append(objs, RandObj())
 	}
-	db := jadb.MakeSomnDB("testData")
+	db := MakeSomnDB("testData")
 	col := db.Collection("objects", new(MyObj))
 	b.StartTimer()
 	for _,v := range objs {
@@ -87,7 +114,7 @@ func BenchmarkSaving(b *testing.B) {
 
 func BenchmarkReading(b *testing.B) {
 	b.StopTimer()
-	dba := jadb.MakeSomnDB("testData")
+	dba := MakeSomnDB("testData")
 	objs := dba.Collection("objects", new(MyObj))
 	for i := 0; i < b.N; i++ {
 		o := RandObj()
@@ -95,7 +122,7 @@ func BenchmarkReading(b *testing.B) {
 		objs.Save(o)
 	}
 	dba.Close()
-	dba = jadb.MakeSomnDB("testData")
+	dba = MakeSomnDB("testData")
 	objs = dba.Collection("objects", new(MyObj))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {

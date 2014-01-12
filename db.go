@@ -2,7 +2,6 @@ package jadb
 
 import (
 	"os"
-	"encoding/gob"
 )
 
 type I interface {
@@ -38,8 +37,6 @@ func (db *SomnDB) Collection(name string, template I) *Collection {
 	os.Mkdir(nc.directory, os.ModeDir | 1023)
 	db.collections[name] = nc
 
-	nc.encwrite = new(WriteForwarder)
-	nc.enc = gob.NewEncoder(nc.encwrite)
 	nc.readStoredKeys()
 	go nc.syncRoutine()
 	return nc

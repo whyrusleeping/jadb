@@ -2,6 +2,10 @@ package jadb
 
 import "io"
 
+//These objects are used when you need to create another object
+//that takes a Reader or Writer as an argument, but you want to
+//be able to change what is being Read or Written to at will.
+//My use case is for gob Encoders, they are expensive to make.
 type WriteForwarder struct {
 	w io.Writer
 }
