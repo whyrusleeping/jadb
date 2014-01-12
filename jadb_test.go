@@ -1,4 +1,4 @@
-package main
+package jadb
 
 import (
 	"github.com/whyrusleeping/jadb"

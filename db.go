@@ -30,8 +30,6 @@ func (db *SomnDB) Collection(name string, template I) *Collection {
 	}
 	nc := new(Collection)
 	nc.cache = make(map[string]I)
-	nc.getch = make(chan string)
-	nc.retch = make(chan I)
 	nc.savech = make(chan I)
 	nc.halt = make(chan bool)
 	nc.finished = make(chan bool)

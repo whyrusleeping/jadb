@@ -11,8 +11,6 @@ import (
 type Collection struct {
 	directory string
 	cache map[string]I
-	getch chan string
-	retch chan I
 	savech chan I
 	halt chan bool
 	finished chan bool
