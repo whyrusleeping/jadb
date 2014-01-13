@@ -1,19 +1,140 @@
 package jadb
 
 import (
+	//"fmt"
 	"os"
 	"errors"
+	"encoding/json"
+	"io"
 )
 
 type FileStore struct {
 	fi *os.File
-	index *os.File
-	objs map[string][]int
+	objs map[string]*fsdoc
 	blocks []bool
 	blocksize int
+	dir string
+}
+
+type fsdoc struct {
+	Blocks []int
+	Size int64
+}
+
+type indexFile struct {
+	NBlocks int
+	Free []byte
+	Docs map[string]*fsdoc
+	Blocksize int
+}
+
+func BoolsToBitmap(b []bool) []byte {
+	nbytes := len(b) / 8
+	if len(b) % 8 != 0 {
+		nbytes++
+	}
+	out := make([]byte, nbytes)
+	for i,v := range b {
+		if v {
+			out[i/8] |= byte(1 << (uint(i)%8))
+		}
+	}
+	return out
+}
+
+func BitmapToBools(b []byte) []bool {
+	out := make([]bool, len(b) * 8)
+	outi := 0
+	for _,v := range b {
+		for i := 0; i < 8; i++ {
+			out[outi] = ((v & (1 << uint(i))) == 1)
+		}
+	}
+	return out
+}
+
+func (fs *FileStore) Close() error {
+	out, err := os.Create(fs.dir + "/index")
+	if err != nil {
+		return err
+	}
+	fsdex := fs.getIndexStruct()
+	enc := json.NewEncoder(out)
+	enc.Encode(fsdex)
+	out.Close()
+	return nil
+}
+
+func (fs *FileStore) getIndexStruct() *indexFile {
+	fsdex := new(indexFile)
+	fsdex.Blocksize = fs.blocksize
+	fsdex.Free = BoolsToBitmap(fs.blocks)
+	fsdex.NBlocks = len(fs.blocks)
+	fsdex.Docs = fs.objs
+	return fsdex
+}
+
+func NewFileStore(dir string, blocksize, nblocks int) (*FileStore, error) {
+	index, err := os.Create(dir + "/index")
+	if err != nil {
+		return nil, err
+	}
+	fsdex := new(indexFile)
+	fsdex.Blocksize = blocksize
+	fsdex.Docs = make(map[string]*fsdoc)
+	fsdex.Free = make([]byte, (nblocks + 8)/8)
+	fsdex.NBlocks = nblocks
+
+	enc := json.NewEncoder(index)
+	enc.Encode(fsdex)
+	index.Close()
+
+	mem, err := os.Create(dir + "/data")
+	blank := make([]byte, 128)
+	for i := 0; i < (blocksize / 128) * nblocks; i++ {
+		mem.Write(blank)
+	}
+	if err != nil {
+		return nil, err
+	}
+	fs := new(FileStore)
+	fs.dir = dir
+	fs.blocksize = blocksize
+	fs.objs = fsdex.Docs
+	fs.blocks = make([]bool, nblocks)
+	fs.fi = mem
+	return fs,nil
+}
+
+func LoadFileStore(dir string) (*FileStore, error) {
+	index, err := os.Open(dir + "/index")
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(index)
+	fsdex := new(indexFile)
+	err = dec.Decode(fsdex)
+	if err != nil {
+		return nil, err
+	}
+	index.Close()
+
+	fs := new(FileStore)
+	fs.blocks = BitmapToBools(fsdex.Free)[:fsdex.NBlocks]
+	fs.objs = fsdex.Docs
+	fs.blocksize = fsdex.Blocksize
+
+	mem, err := os.Open(dir + "/data")
+	if err != nil {
+		return nil, err
+	}
+
+	fs.fi = mem
+	return fs, nil
 }
 
 func (fs *FileStore) getEmptyBlock() (int,error) {
+	//fmt.Println("getting new block")
 	for i,v := range fs.blocks {
 		if !v {
 			fs.blocks[i] = true
@@ -30,13 +151,20 @@ func (fs *FileStore) getEmptyBlock() (int,error) {
 }
 
 func (fs *FileStore) StoreForKey(key string) *MemBlock {
+	doc,ok := fs.objs[key]
+	if !ok {
+		doc = new(fsdoc)
+		fs.objs[key] = doc
+	}
 	mb := new(MemBlock)
 	mb.in = fs
 	mb.key = key
+	mb.d = doc
 	return mb
 }
 
 func (fs *FileStore) extend() error {
+	//fmt.Println("Extending mem block.")
 	cursize := int64(len(fs.blocks) * fs.blocksize)
 	_,err := fs.fi.Seek(cursize, os.SEEK_SET)
 	if err != nil {
@@ -57,11 +185,11 @@ func (fs *FileStore) extend() error {
 }
 
 func (fs *FileStore) DeleteKey(key string) error {
-	blks, ok := fs.objs[key]
+	doc, ok := fs.objs[key]
 	if !ok {
 		return errors.New("Key not found!")
 	}
-	for _,v := range blks {
+	for _,v := range doc.Blocks {
 		fs.blocks[v] = false
 	}
 	delete(fs.objs, key)
@@ -69,6 +197,7 @@ func (fs *FileStore) DeleteKey(key string) error {
 }
 
 func (fs *FileStore) writeBlock(bnum, offset int, b []byte) (int, error) {
+	//fmt.Printf("writing %d bytes in block %d offset %d\n", len(b), bnum, offset)
 	pos := int64((bnum * fs.blocksize) + offset)
 	_,err := fs.fi.Seek(pos, os.SEEK_SET)
 	if err != nil {
@@ -78,6 +207,7 @@ func (fs *FileStore) writeBlock(bnum, offset int, b []byte) (int, error) {
 }
 
 func (fs *FileStore) readBlock(bnum, offset int, b []byte) (int, error) {
+	//fmt.Printf("reading %d bytes in block %d offset %d\n", len(b), bnum, offset)
 	pos := int64((bnum * fs.blocksize) + offset)
 	_,err := fs.fi.Seek(pos, os.SEEK_SET)
 	if err != nil {
@@ -86,25 +216,30 @@ func (fs *FileStore) readBlock(bnum, offset int, b []byte) (int, error) {
 	return fs.fi.Read(b)
 }
 
-func (fs *FileStore) readByteForKey(key string, offset int, b []byte) (int,error) {
-	blks, ok := fs.objs[key]
+func (fs *FileStore) readByteForKey(key string, offset int64, b []byte) (int,error) {
+	//fmt.Println("Read byte for key.")
+	doc, ok := fs.objs[key]
 	if !ok {
 		return 0, errors.New("Invalid store position!")
 	}
-	needend := offset + len(b)
-	haveend := len(blks) * fs.blocksize
-	if needend > haveend {
-		b = b[:haveend-offset]
+	needend := offset + int64(len(b))
+	haveend := len(doc.Blocks) * fs.blocksize
+	if needend > int64(haveend) {
+		b = b[:haveend-int(offset)]
 	}
 
-	rblk := offset / fs.blocksize
-	ri := offset % fs.blocksize
-	for read := 0; read < len(b); {
+	rblk := offset / int64(fs.blocksize)
+	ri := int(offset % int64(fs.blocksize))
+	var read int
+	max := len(b)
+	for read < max {
+		//fmt.Printf("Entering read loop: [%d/%d]\n", read, len(b))
 		toread := fs.blocksize - ri
 		if len(b) < fs.blocksize - ri {
 			toread = len(b)
 		}
-		n, err := fs.readBlock(blks[rblk], ri, b[:toread])
+		n, err := fs.readBlock(doc.Blocks[rblk], ri, b[:toread])
+		//fmt.Printf("Block read returned %d\n", n)
 		if err != nil {
 			return n+read,err
 		}
@@ -112,40 +247,45 @@ func (fs *FileStore) readByteForKey(key string, offset int, b []byte) (int,error
 		ri += n
 		b = b[toread:]
 		if ri == fs.blocksize {
+			//fmt.Println("Advanced block count.")
 			rblk++
 			ri = 0
 		}
 	}
-	return len(b), nil
+	return read, nil
 }
 
-func (fs *FileStore) writeBytesForKey(key string, offset int, b []byte) (int,error) {
-	blks, ok := fs.objs[key]
+func (fs *FileStore) writeBytesForKey(key string, offset int64, b []byte) (int,error) {
+	d, ok := fs.objs[key]
 	if !ok {
-		blks = []int{}
-		fs.objs[key] = blks
+		d = new(fsdoc)
+		d.Blocks = []int{}
+		fs.objs[key] = d
 	}
-	needend := offset + len(b)
-	haveend := len(blks) * fs.blocksize
+	needend := offset + int64(len(b))
+	haveend := int64(len(d.Blocks) * fs.blocksize)
 	for needend > haveend {
 		i,err := fs.getEmptyBlock()
+		//fmt.Printf("Allocated block: %d\n", i)
 		if err != nil {
 			//TODO: probably not just return here
 			return 0,err
 		}
-		blks = append(blks, i)
-		haveend += fs.blocksize
+		d.Blocks = append(d.Blocks, i)
+		haveend += int64(fs.blocksize)
 	}
-	fs.objs[key] = blks
+	fs.objs[key] = d
 
-	wrblk := offset / fs.blocksize
-	wri := offset % fs.blocksize
-	for written := 0; written < len(b); {
+	wrblk := offset / int64(fs.blocksize)
+	wri := int(offset) % fs.blocksize
+	var written int
+	max := len(b)
+	for written < max {
 		towrite := fs.blocksize - wri
 		if len(b) < fs.blocksize - wri {
 			towrite = len(b)
 		}
-		n, err := fs.writeBlock(blks[wrblk], wri, b[:towrite])
+		n, err := fs.writeBlock(d.Blocks[wrblk], wri, b[:towrite])
 		if err != nil {
 			return n+written,err
 		}
@@ -157,25 +297,39 @@ func (fs *FileStore) writeBytesForKey(key string, offset int, b []byte) (int,err
 			wri = 0
 		}
 	}
-	return len(b), nil
+	return written, nil
 }
 
 //Memblock implements Read/Writer for a given key in the filestore
 type MemBlock struct {
 	key string
-	offset int
+	offset int64
 	in *FileStore
+	d *fsdoc
 }
 
 func (mb *MemBlock) Write(b []byte) (int, error) {
+	////fmt.Printf("Calling write for %d bytes.\n", len(b))
 	n, err := mb.in.writeBytesForKey(mb.key, mb.offset, b)
-	mb.offset += n
+	//fmt.Printf("writebytesforkey returned %d\n", n)
+	mb.offset += int64(n)
+	if mb.offset > mb.d.Size {
+		mb.d.Size = mb.offset
+	}
 	return n, err
 }
 
 func (mb *MemBlock) Read(b []byte) (int, error) {
+	if int64(len(b)) + mb.offset > mb.d.Size {
+		b = b[:mb.d.Size-mb.offset]
+	}
+	//fmt.Printf("Calling read: %d/%d\n", mb.offset, mb.d.Size)
 	n, err := mb.in.readByteForKey(mb.key, mb.offset, b)
-	mb.offset += n
+	if n == 0 {
+		return 0, io.EOF
+	}
+	//fmt.Printf("readbyteforkey returned %d\n", n)
+	mb.offset += int64(n)
 	return n, err
 }
 
