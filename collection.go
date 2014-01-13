@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 	"fmt"
-	"compress/gzip"
+	//"compress/gzip"
 )
 
 type Collection struct {
@@ -15,6 +15,7 @@ type Collection struct {
 	savech chan I
 	halt chan bool
 	finished chan bool
+	store *FileStore
 
 	lock sync.RWMutex
 
@@ -55,29 +56,23 @@ func (col *Collection) cleanup() {
 	if err != nil {
 		fmt.Println("Error writing key file!")
 	}
+	col.store.Close()
 }
 
 //Loads the value for the given key from the disk and caches it in memory
 func (col *Collection) cacheKey(id string) I {
-	path := col.directory + "/" + id
-	fi, err := os.Open(path)
-	if err != nil {
-		//TODO: handle error?
-		fmt.Println("Error opening file...")
-		fmt.Println(err)
-		return nil
-	}
+	fi := col.store.StoreForKey(id)
 
-	zip, err := gzip.NewReader(fi)
+	/*zip, err := gzip.NewReader(fi)
 	if err != nil {
 		//TODO: handle this error too
 		fmt.Println(err)
 		return nil
-	}
+	}*/
 
 	v := col.template.New()
-	dec := json.NewDecoder(zip)
-	err = dec.Decode(v)
+	dec := json.NewDecoder(fi)
+	err := dec.Decode(v)
 	if err != nil {
 		//TODO: more handling
 		panic(err)
@@ -87,8 +82,7 @@ func (col *Collection) cacheKey(id string) I {
 		fmt.Println("Decoding returned nil value...")
 	}
 	col.cache[id] = v
-	zip.Close()
-	fi.Close()
+	//zip.Close()
 	return v
 }
 
@@ -125,16 +119,12 @@ func (col *Collection) writeKeyFile() error {
 }
 
 func (col *Collection) writeDoc(o I) error {
-	path := col.directory + "/" + o.GetID()
-	fi, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	zip := gzip.NewWriter(fi)
-	enc := json.NewEncoder(zip)
-	err = enc.Encode(o)
-	zip.Close()
-	fi.Close()
+	fi := col.store.StoreForKey(o.GetID())
+
+	//zip := gzip.NewWriter(fi)
+	enc := json.NewEncoder(fi)
+	err := enc.Encode(o)
+	//zip.Close()
 	return err
 }
 

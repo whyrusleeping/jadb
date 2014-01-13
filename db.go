@@ -36,6 +36,14 @@ func (db *SomnDB) Collection(name string, template I) *Collection {
 	nc.template = template
 	os.Mkdir(nc.directory, os.ModeDir | 1023)
 	db.collections[name] = nc
+	fs, err := LoadFileStore(nc.directory)
+	if err != nil {
+		fs, err = NewFileStore(nc.directory,256,1024)
+		if err != nil {
+			panic(err)
+		}
+	}
+	nc.store = fs
 
 	nc.readStoredKeys()
 	go nc.syncRoutine()
