@@ -6,9 +6,11 @@ import (
 	"io"
 	"os"
 	"fmt"
-	//"compress/gzip"
 )
 
+//A collection is a table in the database for a single struct type
+//it manages storing data in its given directory and disk writes
+//occur in a non-blocking manner
 type Collection struct {
 	directory string
 	cache map[string]I
@@ -63,13 +65,6 @@ func (col *Collection) cleanup() {
 func (col *Collection) cacheKey(id string) I {
 	fi := col.store.StoreForKey(id)
 
-	/*zip, err := gzip.NewReader(fi)
-	if err != nil {
-		//TODO: handle this error too
-		fmt.Println(err)
-		return nil
-	}*/
-
 	v := col.template.New()
 	dec := json.NewDecoder(fi)
 	err := dec.Decode(v)
@@ -82,7 +77,6 @@ func (col *Collection) cacheKey(id string) I {
 		fmt.Println("Decoding returned nil value...")
 	}
 	col.cache[id] = v
-	//zip.Close()
 	return v
 }
 
@@ -121,10 +115,8 @@ func (col *Collection) writeKeyFile() error {
 func (col *Collection) writeDoc(o I) error {
 	fi := col.store.StoreForKey(o.GetID())
 
-	//zip := gzip.NewWriter(fi)
 	enc := json.NewEncoder(fi)
 	err := enc.Encode(o)
-	//zip.Close()
 	return err
 }
 
