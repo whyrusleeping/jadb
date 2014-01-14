@@ -25,7 +25,7 @@ func (p *Player) New() jadb.I {
 }
 
 func main() {
-	db := jadb.MakeSomnDB("data")
+	db := jadb.NewJadb("data")
 	players := db.Collection("Players", &Player{})
 	players.Save(&Player{"Joe",16})
 	players.Save(&Player{"Steve",2})
