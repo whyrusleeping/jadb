@@ -9,20 +9,20 @@ type I interface {
 	New() I
 }
 
-type SomnDB struct {
+type Jadb struct {
 	collections map[string]*Collection
 	directory string
 }
 
-func MakeSomnDB(dir string) *SomnDB {
-	db := new(SomnDB)
+func NewJadb(dir string) *Jadb {
+	db := new(Jadb)
 	db.directory = dir
 	db.collections = make(map[string]*Collection)
 	os.Mkdir(dir, os.ModeDir | 1023)
 	return db
 }
 
-func (db *SomnDB) Collection(name string, template I) *Collection {
+func (db *Jadb) Collection(name string, template I) *Collection {
 	c, ok := db.collections[name]
 	if ok {
 		return c
@@ -50,7 +50,7 @@ func (db *SomnDB) Collection(name string, template I) *Collection {
 	return nc
 }
 
-func (db *SomnDB) Close() {
+func (db *Jadb) Close() {
 	if r := recover(); r != nil {
 		//recovered from panic, now lets clean up
 	}

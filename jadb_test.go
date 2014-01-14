@@ -37,7 +37,7 @@ func RandObj() *MyObj {
 	o := new(MyObj)
 	o.Value = RandString(16)
 	o.Num = orand.Int()
-	o.Contents = RandString(512)
+	o.Contents = RandString(2048)
 	return o
 }
 
@@ -72,7 +72,7 @@ func TestMany(t *testing.T) {
 	db := MakeSomnDB("testData")
 	col := db.Collection("objects", new(MyObj))
 	var list []*MyObj
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 5000; i++ {
 		o := RandObj()
 		col.Save(o)
 		list = append(list, o)
