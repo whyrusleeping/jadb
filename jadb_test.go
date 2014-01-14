@@ -4,6 +4,7 @@ import (
 	"os"
 	"fmt"
 	"testing"
+	"runtime/pprof"
 	"crypto/rand"
 	orand "math/rand"
 	"encoding/base32"
@@ -69,6 +70,11 @@ func TestBasic(t *testing.T) {
 }
 
 func TestMany(t *testing.T) {
+	fi,err := os.Create("out.prof")
+	if err != nil {
+		panic(err)
+	}
+	pprof.StartCPUProfile(fi)
 	db := NewJadb("testData")
 	col := db.Collection("objects", new(MyObj))
 	var list []*MyObj
@@ -92,6 +98,8 @@ func TestMany(t *testing.T) {
 			t.Fail()
 		}
 	}
+	pprof.StopCPUProfile()
+	fi.Close()
 	os.RemoveAll("testData")
 }
 

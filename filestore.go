@@ -2,6 +2,7 @@ package jadb
 
 import (
 	//"fmt"
+	"time"
 	"os"
 	"errors"
 	"encoding/json"
@@ -11,9 +12,17 @@ import (
 type FileStore struct {
 	fi *os.File
 	objs map[string]*fsdoc
-	blocks []bool
+	freemap []bool
+	blocks []*block
+	docaching bool
+
 	blocksize int
 	dir string
+}
+
+type block struct {
+	cache []byte
+	last time.Time
 }
 
 type fsdoc struct {
@@ -61,15 +70,30 @@ func (fs *FileStore) Close() error {
 	fsdex := fs.getIndexStruct()
 	enc := json.NewEncoder(out)
 	enc.Encode(fsdex)
+	if fs.docaching {
+		fs.writeCache()
+	}
 	out.Close()
+	return nil
+}
+
+//TODO: im drink right now, handle errors here
+func (fs *FileStore) writeCache() error {
+	for _,v := range fs.blocks {
+		if v == nil || v.cache == nil {
+			fs.fi.Seek(int64(fs.blocksize), os.SEEK_CUR)
+		} else {
+			fs.fi.Write(v.cache)
+		}
+	}
 	return nil
 }
 
 func (fs *FileStore) getIndexStruct() *indexFile {
 	fsdex := new(indexFile)
 	fsdex.Blocksize = fs.blocksize
-	fsdex.Free = BoolsToBitmap(fs.blocks)
-	fsdex.NBlocks = len(fs.blocks)
+	fsdex.Free = BoolsToBitmap(fs.freemap)
+	fsdex.NBlocks = len(fs.freemap)
 	fsdex.Docs = fs.objs
 	return fsdex
 }
@@ -101,8 +125,10 @@ func NewFileStore(dir string, blocksize, nblocks int) (*FileStore, error) {
 	fs.dir = dir
 	fs.blocksize = blocksize
 	fs.objs = fsdex.Docs
-	fs.blocks = make([]bool, nblocks)
+	fs.freemap = make([]bool, nblocks)
+	fs.blocks = make([]*block, nblocks)
 	fs.fi = mem
+	fs.docaching = false
 	return fs,nil
 }
 
@@ -120,7 +146,7 @@ func LoadFileStore(dir string) (*FileStore, error) {
 	index.Close()
 
 	fs := new(FileStore)
-	fs.blocks = BitmapToBools(fsdex.Free)[:fsdex.NBlocks]
+	fs.freemap = BitmapToBools(fsdex.Free)[:fsdex.NBlocks]
 	fs.objs = fsdex.Docs
 	fs.blocksize = fsdex.Blocksize
 
@@ -135,18 +161,18 @@ func LoadFileStore(dir string) (*FileStore, error) {
 
 func (fs *FileStore) getEmptyBlock() (int,error) {
 	//fmt.Println("getting new block")
-	for i,v := range fs.blocks {
+	for i,v := range fs.freemap {
 		if !v {
-			fs.blocks[i] = true
+			fs.freemap[i] = true
 			return i,nil
 		}
 	}
-	i := len(fs.blocks)
+	i := len(fs.freemap)
 	err := fs.extend()
 	if err != nil {
 		panic(err)
 	}
-	fs.blocks[i] = true
+	fs.freemap[i] = true
 	return i,nil
 }
 
@@ -165,12 +191,12 @@ func (fs *FileStore) StoreForKey(key string) *MemBlock {
 
 func (fs *FileStore) extend() error {
 	//fmt.Println("Extending mem block.")
-	cursize := int64(len(fs.blocks) * fs.blocksize)
+	cursize := int64(len(fs.freemap) * fs.blocksize)
 	_,err := fs.fi.Seek(cursize, os.SEEK_SET)
 	if err != nil {
 		return err
 	}
-	blockstogrow := len(fs.blocks) / 2
+	blockstogrow := len(fs.freemap) / 2
 	bytestogrow := blockstogrow * fs.blocksize
 	blank := make([]byte, 128)
 	for i := 0; i < bytestogrow / 128; i++ {
@@ -180,7 +206,8 @@ func (fs *FileStore) extend() error {
 			return err
 		}
 	}
-	fs.blocks = append(fs.blocks, make([]bool, blockstogrow)...)
+	fs.freemap = append(fs.freemap, make([]bool, blockstogrow)...)
+	fs.blocks = append(fs.blocks, make([]*block, blockstogrow)...)
 	return nil
 }
 
@@ -190,7 +217,7 @@ func (fs *FileStore) DeleteKey(key string) error {
 		return errors.New("Key not found!")
 	}
 	for _,v := range doc.Blocks {
-		fs.blocks[v] = false
+		fs.freemap[v] = false
 	}
 	delete(fs.objs, key)
 	return nil
@@ -198,22 +225,50 @@ func (fs *FileStore) DeleteKey(key string) error {
 
 func (fs *FileStore) writeBlock(bnum, offset int, b []byte) (int, error) {
 	//fmt.Printf("writing %d bytes in block %d offset %d\n", len(b), bnum, offset)
-	pos := int64((bnum * fs.blocksize) + offset)
-	_,err := fs.fi.Seek(pos, os.SEEK_SET)
-	if err != nil {
-		return 0, err
+	if fs.docaching {
+		blk := fs.blocks[bnum]
+		if blk == nil {
+			blk = new(block)
+			fs.blocks[bnum] = blk
+		}
+		if blk.cache == nil {
+			blk.cache = make([]byte, fs.blocksize)
+		}
+		copy(blk.cache[offset:], b)
+		return len(b),nil
+	} else {
+		pos := int64((bnum * fs.blocksize) + offset)
+		_,err := fs.fi.Seek(pos, os.SEEK_SET)
+		if err != nil {
+			return 0, err
+		}
+		return fs.fi.Write(b)
 	}
-	return fs.fi.Write(b)
 }
 
 func (fs *FileStore) readBlock(bnum, offset int, b []byte) (int, error) {
 	//fmt.Printf("reading %d bytes in block %d offset %d\n", len(b), bnum, offset)
-	pos := int64((bnum * fs.blocksize) + offset)
-	_,err := fs.fi.Seek(pos, os.SEEK_SET)
-	if err != nil {
-		return 0, err
+	if fs.docaching {
+		blk := fs.blocks[bnum]
+		if blk == nil {
+			blk = new(block)
+			fs.blocks[bnum] = blk
+		}
+		if blk.cache == nil {
+			blk.cache = make([]byte, fs.blocksize)
+			fs.fi.Seek(int64(bnum * fs.blocksize), os.SEEK_SET)
+			fs.fi.Read(blk.cache)
+		}
+		copy(b,blk.cache[offset:])
+		return len(b),nil
+	} else {
+		pos := int64((bnum * fs.blocksize) + offset)
+		_,err := fs.fi.Seek(pos, os.SEEK_SET)
+		if err != nil {
+			return 0, err
+		}
+		return fs.fi.Read(b)
 	}
-	return fs.fi.Read(b)
 }
 
 func (fs *FileStore) readByteForKey(key string, offset int64, b []byte) (int,error) {
