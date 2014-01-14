@@ -42,7 +42,7 @@ func RandObj() *MyObj {
 }
 
 func TestBasic(t *testing.T) {
-	db := MakeSomnDB("testData")
+	db := NewJadb("testData")
 	col := db.Collection("objects", new(MyObj))
 	o := RandObj()
 	col.Save(o)
@@ -55,7 +55,7 @@ func TestBasic(t *testing.T) {
 	db.Close()
 
 	//Test cold recall
-	db = MakeSomnDB("testData")
+	db = NewJadb("testData")
 	col = db.Collection("objects", new(MyObj))
 	val := col.FindByID(o.GetID())
 	if val == nil {
@@ -69,7 +69,7 @@ func TestBasic(t *testing.T) {
 }
 
 func TestMany(t *testing.T) {
-	db := MakeSomnDB("testData")
+	db := NewJadb("testData")
 	col := db.Collection("objects", new(MyObj))
 	var list []*MyObj
 	for i := 0; i < 5000; i++ {
@@ -80,7 +80,7 @@ func TestMany(t *testing.T) {
 	db.Close()
 
 	//Test cold recall
-	db = MakeSomnDB("testData")
+	db = NewJadb("testData")
 	col = db.Collection("objects", new(MyObj))
 	for _,v := range list {
 		val := col.FindByID(v.GetID())
@@ -101,7 +101,7 @@ func BenchmarkSaving(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		objs = append(objs, RandObj())
 	}
-	db := MakeSomnDB("testData")
+	db := NewJadb("testData")
 	col := db.Collection("objects", new(MyObj))
 	b.StartTimer()
 	for _,v := range objs {
@@ -114,7 +114,7 @@ func BenchmarkSaving(b *testing.B) {
 
 func BenchmarkReading(b *testing.B) {
 	b.StopTimer()
-	dba := MakeSomnDB("testData")
+	dba := NewJadb("testData")
 	objs := dba.Collection("objects", new(MyObj))
 	for i := 0; i < b.N; i++ {
 		o := RandObj()
@@ -122,7 +122,7 @@ func BenchmarkReading(b *testing.B) {
 		objs.Save(o)
 	}
 	dba.Close()
-	dba = MakeSomnDB("testData")
+	dba = NewJadb("testData")
 	objs = dba.Collection("objects", new(MyObj))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
