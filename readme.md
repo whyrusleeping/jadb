@@ -21,4 +21,10 @@ Example Usage:
 
 	players.Save(GetSomePlayer()) //Repeat as needed
 
+	//Get Joe
 	mypl := players.FindByID("Joe").(*Player)
+
+	//Get all players higher than level 10
+	highlevel := players.FindWhere(func (i jadb.I) bool {
+		return i.(*Player).Level > 10
+	})
