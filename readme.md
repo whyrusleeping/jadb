@@ -28,3 +28,9 @@ Example Usage:
 	highlevel := players.FindWhere(func (i jadb.I) bool {
 		return i.(*Player).Level > 10
 	})
+
+##Still to be done
+- Add an fs lock for collections
+- Profile everything
+- Find a real world application to test in
+- Better error handling
