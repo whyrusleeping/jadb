@@ -37,9 +37,6 @@ func (db *Jadb) Collection(name string, template I) *Collection {
 }
 
 func (db *Jadb) Close() {
-	if r := recover(); r != nil {
-		//recovered from panic, now lets clean up
-	}
 	for _,v := range db.collections {
 		v.cleanup()
 	}

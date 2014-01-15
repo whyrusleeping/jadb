@@ -4,12 +4,11 @@ import (
 	"os"
 	"fmt"
 	"testing"
+	"math/rand"
 	"runtime/pprof"
-	"crypto/rand"
-	orand "math/rand"
-	"encoding/base32"
 )
 
+var src string = "abcdefghijklmnopqrstuvwxyz1234567890"
 type MyObj struct {
 	Value string
 	Num int
@@ -30,14 +29,16 @@ func (o *MyObj) Equals(m *MyObj) bool {
 
 func RandString(size int) string {
 	b := make([]byte, size)
-	rand.Read(b)
-	return base32.StdEncoding.EncodeToString(b)[:size]
+	for i,_ := range b {
+		b[i] = src[rand.Intn(len(src))]
+	}
+	return string(b)
 }
 
 func RandObj() *MyObj {
 	o := new(MyObj)
 	o.Value = RandString(16)
-	o.Num = orand.Int()
+	o.Num = rand.Int()
 	o.Contents = RandString(2048)
 	return o
 }
@@ -74,14 +75,16 @@ func TestMany(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	var list []*MyObj
+	for i := 0; i < 100000; i++ {
+		o := RandObj()
+		list = append(list, o)
+	}
 	pprof.StartCPUProfile(fi)
 	db := NewJadb("testData")
 	col := db.Collection("objects", new(MyObj))
-	var list []*MyObj
-	for i := 0; i < 5000; i++ {
-		o := RandObj()
-		col.Save(o)
-		list = append(list, o)
+	for _,v := range list {
+		col.Save(v)
 	}
 	db.Close()
 
