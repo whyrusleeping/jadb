@@ -16,7 +16,7 @@ func TestDatastoreSingle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := make([]byte, 5000)
+	data := make([]byte, 500)
 	rand.Read(data)
 	mb := fs.StoreForKey("random")
 	mb.Write(data)
@@ -32,8 +32,8 @@ func TestDatastoreSingle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(data,b) {
-		//fmt.Println(data)
-		//fmt.Println(b)
+		fmt.Println(data)
+		fmt.Println(b)
 		t.Fatal("Data mismatch...")
 	}
 }
