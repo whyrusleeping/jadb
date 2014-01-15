@@ -27,26 +27,12 @@ func (db *Jadb) Collection(name string, template I) *Collection {
 	if ok {
 		return c
 	}
-	nc := new(Collection)
-	nc.cache = make(map[string]I)
-	nc.savech = make(chan I)
-	nc.halt = make(chan bool)
-	nc.finished = make(chan bool)
-	nc.directory = db.directory + "/" + name
-	nc.template = template
-	os.Mkdir(nc.directory, os.ModeDir | 1023)
-	db.collections[name] = nc
-	fs, err := LoadFileStore(nc.directory)
+	nc, err := OpenCollection(db, name, template)
 	if err != nil {
-		fs, err = NewFileStore(nc.directory,256,1024)
-		if err != nil {
-			panic(err)
-		}
+		panic(err)
+		return nil
 	}
-	nc.store = fs
-
-	nc.readStoredKeys()
-	go nc.syncRoutine()
+	db.collections[name] = nc
 	return nc
 }
 

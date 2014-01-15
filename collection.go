@@ -7,6 +7,7 @@ import (
 	"os"
 	"fmt"
 	//"compress/gzip"
+	"errors"
 )
 
 type Collection struct {
@@ -18,8 +19,41 @@ type Collection struct {
 	store *FileStore
 
 	lock sync.RWMutex
+	fslock *os.File
 
 	template I
+}
+
+func OpenCollection(db *Jadb, name string, template I) (*Collection, error) {
+	dir := db.directory + "/" + name
+	os.Mkdir(dir, os.ModeDir | 1023)
+	lockfipath := dir + "/fs.lock"
+	lockfi, err := os.Create(lockfipath)
+	if err != nil {
+		fmt.Println(err)
+		return nil, errors.New("Could not acquire fs lock!")
+	}
+	//Get lock on directory
+	nc := new(Collection)
+	nc.cache = make(map[string]I)
+	nc.savech = make(chan I)
+	nc.halt = make(chan bool)
+	nc.finished = make(chan bool)
+	nc.directory = db.directory + "/" + name
+	nc.template = template
+	nc.fslock = lockfi
+	fs, err := LoadFileStore(nc.directory)
+	if err != nil {
+		fs, err = NewFileStore(nc.directory,256,1024)
+		if err != nil {
+			panic(err)
+		}
+	}
+	nc.store = fs
+
+	nc.readStoredKeys()
+	go nc.syncRoutine()
+	return nc, nil
 }
 
 func (col *Collection) readStoredKeys() error {
@@ -57,6 +91,7 @@ func (col *Collection) cleanup() {
 		fmt.Println("Error writing key file!")
 	}
 	col.store.Close()
+	col.fslock.Close()
 }
 
 //Loads the value for the given key from the disk and caches it in memory
