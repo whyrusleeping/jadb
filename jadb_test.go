@@ -98,6 +98,7 @@ func TestBasic(t *testing.T) {
 	if !o.Equals(b) {
 		t.Fail()
 	}
+	db.Close()
 	os.RemoveAll("testData")
 }
 
@@ -107,7 +108,7 @@ func TestMany(t *testing.T) {
 		panic(err)
 	}
 	var list []*MyObj
-	for i := 0; i < 50000; i++ {
+	for i := 0; i < 5000; i++ {
 		o := RandObj()
 		list = append(list, o)
 	}
@@ -132,6 +133,7 @@ func TestMany(t *testing.T) {
 			t.Fail()
 		}
 	}
+	db.Close()
 	pprof.StopCPUProfile()
 	fi.Close()
 	os.RemoveAll("testData")
@@ -193,6 +195,7 @@ func BenchmarkReading(b *testing.B) {
 			objs.FindByID(s)
 		}
 	}
+	dba.Close()
 	b.StopTimer()
 	os.RemoveAll("testData")
 }

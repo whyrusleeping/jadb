@@ -169,6 +169,7 @@ func (col *Collection) writeDoc(o I) error {
 //Do all disk writes in a separate thread, and in the order
 //that they are queued. 
 func (col *Collection) syncRoutine() {
+	fmt.Println("Starting Sync Routine.")
 	for {
 		select {
 			case save := <-col.savech:
@@ -182,7 +183,8 @@ func (col *Collection) syncRoutine() {
 					continue
 				} else {
 					col.finished <-true
-					break
+					fmt.Println("Leaving Sync Routine.")
+					return
 				}
 		}
 	}
