@@ -44,7 +44,7 @@ func OpenCollection(db *Jadb, name string, template I) (*Collection, error) {
 	nc.fslock = lockfi
 	fs, err := LoadFileStore(nc.directory)
 	if err != nil {
-		fs, err = NewFileStore(nc.directory,256,1024)
+		fs, err = NewFileStore(nc.directory,1024,4096)
 		if err != nil {
 			panic(err)
 		}

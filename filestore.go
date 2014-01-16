@@ -126,8 +126,8 @@ func NewFileStore(dir string, blocksize, nblocks int) (*FileStore, error) {
 	index.Close()
 
 	mem, err := os.Create(dir + "/data")
-	blank := make([]byte, 128)
-	for i := 0; i < (blocksize / 128) * nblocks; i++ {
+	blank := make([]byte, 4096)
+	for i := 0; i < (blocksize * nblocks) / 4096; i++ {
 		mem.Write(blank)
 	}
 	if err != nil {
@@ -211,16 +211,26 @@ func (fs *FileStore) extend() error {
 	if err != nil {
 		return err
 	}
-	blockstogrow := len(fs.freemap) / 2
+	blockstogrow := len(fs.freemap) * 2
 	bytestogrow := blockstogrow * fs.blocksize
-	blank := make([]byte, 128)
-	for i := 0; i < bytestogrow / 128; i++ {
+	for blockstogrow < (1024 * 1024) {
+		blockstogrow++
+		bytestogrow = blockstogrow * fs.blocksize
+	}
+	blank := make([]byte, bytestogrow)
+	_,err = fs.fi.Write(blank)
+	if err != nil {
+		//TODO: handle THIS better
+		return err
+	}
+	/*
+	for i := 0; i < bytestogrow / 4096; i++ {
 		_,err := fs.fi.Write(blank)
 		if err != nil {
 			//TODO: handle THIS better
 			return err
 		}
-	}
+	}*/
 	fs.freemap = append(fs.freemap, make([]bool, blockstogrow)...)
 	fs.blocks = append(fs.blocks, make([]*block, blockstogrow)...)
 	return nil

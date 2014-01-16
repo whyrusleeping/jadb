@@ -123,3 +123,57 @@ func TestDatastoreGrowth(t *testing.T) {
 	}
 }
 
+func BenchmarkFileWrites(b *testing.B) {
+	b.StopTimer()
+	os.Mkdir("testData", os.ModeDir | 1023)
+	defer os.RemoveAll("testData")
+	var keys []string
+	var datas [][]byte
+
+	for i := 0; i < b.N; i++ {
+		k := fmt.Sprint(i)
+		keys = append(keys, k)
+		buf := make([]byte, 4096)
+		rand.Read(buf)
+		datas = append(datas, buf)
+	}
+
+	fi, err := os.Create("testData/dump")
+	if err != nil {
+		panic(err)
+	}
+	b.StartTimer()
+
+	for _,dat := range datas {
+		fi.Write(dat)
+	}
+
+	fi.Close()
+}
+func BenchmarkFilestoreWrites(b *testing.B) {
+	b.StopTimer()
+	os.Mkdir("testData", os.ModeDir | 1023)
+	defer os.RemoveAll("testData")
+	fs,err := NewFileStore("testData",1024,1024)
+	if err != nil {
+		panic(err)
+	}
+	var keys []string
+	var datas [][]byte
+
+	for i := 0; i < b.N; i++ {
+		k := fmt.Sprint(i)
+		keys = append(keys, k)
+		buf := make([]byte, 4096)
+		rand.Read(buf)
+		datas = append(datas, buf)
+	}
+
+	b.StartTimer()
+	for i,k := range keys {
+		fi := fs.StoreForKey(k)
+		fi.Write(datas[i])
+	}
+
+	fs.Close()
+}
