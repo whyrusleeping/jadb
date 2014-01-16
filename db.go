@@ -27,6 +27,9 @@ func (db *Jadb) Collection(name string, template I) *Collection {
 	if ok {
 		return c
 	}
+	if template == nil {
+		panic("No Template given for collection!")
+	}
 	nc, err := OpenCollection(db, name, template)
 	if err != nil {
 		panic(err)

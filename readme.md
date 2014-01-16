@@ -5,6 +5,8 @@ A certain level of generality is achieved by using an interface with a 'New' met
 This allows the database to allocate the correct structs in the form of interfaces
 for unmarshalling data into.
 
+Jadb is similar to SQLite in that its run with your program, not as a separate daemon, and is backed by flat files. 
+
 Example Usage:
 
     //create the database object
@@ -29,8 +31,10 @@ Example Usage:
 		return i.(*Player).Level > 10
 	})
 
+	//Always close the database to ensure caches get written
+	db.Close()
+
 ##Still to be done
-- Add an fs lock for collections
-- Profile everything
+- Profile everything (including memory)
 - Find a real world application to test in
 - Better error handling
