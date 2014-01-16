@@ -13,6 +13,7 @@ type FileStore struct {
 	fi *os.File
 	objs map[string]*fsdoc
 	freemap []bool
+	lastfree int
 	blocks []*block
 	docaching bool
 
@@ -73,17 +74,28 @@ func (fs *FileStore) Close() error {
 	if fs.docaching {
 		fs.writeCache()
 	}
+	fs.fi.Close()
 	out.Close()
 	return nil
 }
 
-//TODO: im drink right now, handle errors here
 func (fs *FileStore) writeCache() error {
+	//fmt.Println("writing cache!")
+	fs.fi.Seek(0,os.SEEK_SET)
+	skip := 0
 	for _,v := range fs.blocks {
 		if v == nil || v.cache == nil {
-			fs.fi.Seek(int64(fs.blocksize), os.SEEK_CUR)
+			skip++
 		} else {
-			fs.fi.Write(v.cache)
+			//fmt.Printf("Writing block: %d\n", i)
+			//fmt.Println(v.cache)
+			if skip > 0 {
+				fs.fi.Seek(int64(skip * fs.blocksize), os.SEEK_CUR)
+			}
+			_,err := fs.fi.Write(v.cache)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 	return nil
@@ -114,8 +126,8 @@ func NewFileStore(dir string, blocksize, nblocks int) (*FileStore, error) {
 	index.Close()
 
 	mem, err := os.Create(dir + "/data")
-	blank := make([]byte, 128)
-	for i := 0; i < (blocksize / 128) * nblocks; i++ {
+	blank := make([]byte, 4096)
+	for i := 0; i < (blocksize * nblocks) / 4096; i++ {
 		mem.Write(blank)
 	}
 	if err != nil {
@@ -128,7 +140,7 @@ func NewFileStore(dir string, blocksize, nblocks int) (*FileStore, error) {
 	fs.freemap = make([]bool, nblocks)
 	fs.blocks = make([]*block, nblocks)
 	fs.fi = mem
-	fs.docaching = false
+	fs.docaching = true
 	return fs,nil
 }
 
@@ -147,8 +159,10 @@ func LoadFileStore(dir string) (*FileStore, error) {
 
 	fs := new(FileStore)
 	fs.freemap = BitmapToBools(fsdex.Free)[:fsdex.NBlocks]
+	fs.blocks = make([]*block, len(fs.freemap))
 	fs.objs = fsdex.Docs
 	fs.blocksize = fsdex.Blocksize
+	fs.docaching = true
 
 	mem, err := os.Open(dir + "/data")
 	if err != nil {
@@ -161,9 +175,10 @@ func LoadFileStore(dir string) (*FileStore, error) {
 
 func (fs *FileStore) getEmptyBlock() (int,error) {
 	//fmt.Println("getting new block")
-	for i,v := range fs.freemap {
-		if !v {
+	for i := fs.lastfree; i < len(fs.freemap); i++ {
+		if !fs.freemap[i] {
 			fs.freemap[i] = true
+			fs.lastfree = i + 1
 			return i,nil
 		}
 	}
@@ -196,16 +211,26 @@ func (fs *FileStore) extend() error {
 	if err != nil {
 		return err
 	}
-	blockstogrow := len(fs.freemap) / 2
+	blockstogrow := len(fs.freemap) * 2
 	bytestogrow := blockstogrow * fs.blocksize
-	blank := make([]byte, 128)
-	for i := 0; i < bytestogrow / 128; i++ {
+	for blockstogrow < (1024 * 1024) {
+		blockstogrow++
+		bytestogrow = blockstogrow * fs.blocksize
+	}
+	blank := make([]byte, bytestogrow)
+	_,err = fs.fi.Write(blank)
+	if err != nil {
+		//TODO: handle THIS better
+		return err
+	}
+	/*
+	for i := 0; i < bytestogrow / 4096; i++ {
 		_,err := fs.fi.Write(blank)
 		if err != nil {
 			//TODO: handle THIS better
 			return err
 		}
-	}
+	}*/
 	fs.freemap = append(fs.freemap, make([]bool, blockstogrow)...)
 	fs.blocks = append(fs.blocks, make([]*block, blockstogrow)...)
 	return nil
@@ -218,6 +243,9 @@ func (fs *FileStore) DeleteKey(key string) error {
 	}
 	for _,v := range doc.Blocks {
 		fs.freemap[v] = false
+		if v < fs.lastfree {
+			fs.lastfree = v
+		}
 	}
 	delete(fs.objs, key)
 	return nil
@@ -228,12 +256,15 @@ func (fs *FileStore) writeBlock(bnum, offset int, b []byte) (int, error) {
 	if fs.docaching {
 		blk := fs.blocks[bnum]
 		if blk == nil {
+			//fmt.Println("Doing things here...")
 			blk = new(block)
 			fs.blocks[bnum] = blk
 		}
 		if blk.cache == nil {
+			//fmt.Println("Allocating cache for block.")
 			blk.cache = make([]byte, fs.blocksize)
 		}
+		//fmt.Println(b)
 		copy(blk.cache[offset:], b)
 		return len(b),nil
 	} else {
@@ -255,13 +286,18 @@ func (fs *FileStore) readBlock(bnum, offset int, b []byte) (int, error) {
 			fs.blocks[bnum] = blk
 		}
 		if blk.cache == nil {
+			//fmt.Println("Nil cache block, reading from disk...")
 			blk.cache = make([]byte, fs.blocksize)
 			fs.fi.Seek(int64(bnum * fs.blocksize), os.SEEK_SET)
 			fs.fi.Read(blk.cache)
+			//fmt.Println(blk.cache)
 		}
+		//fmt.Printf("offset: %d\n", offset)
+		//fmt.Println(blk.cache[offset:])
 		copy(b,blk.cache[offset:])
 		return len(b),nil
 	} else {
+		//fmt.Println("Shouldnt be here...")
 		pos := int64((bnum * fs.blocksize) + offset)
 		_,err := fs.fi.Seek(pos, os.SEEK_SET)
 		if err != nil {

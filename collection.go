@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"fmt"
+	//"compress/gzip"
+	"errors"
 )
 
 //A collection is a table in the database for a single struct type
@@ -20,8 +22,41 @@ type Collection struct {
 	store *FileStore
 
 	lock sync.RWMutex
+	fslock *os.File
 
 	template I
+}
+
+func OpenCollection(db *Jadb, name string, template I) (*Collection, error) {
+	dir := db.directory + "/" + name
+	os.Mkdir(dir, os.ModeDir | 1023)
+	lockfipath := dir + "/fs.lock"
+	lockfi, err := os.Create(lockfipath)
+	if err != nil {
+		fmt.Println(err)
+		return nil, errors.New("Could not acquire fs lock!")
+	}
+	//Get lock on directory
+	nc := new(Collection)
+	nc.cache = make(map[string]I)
+	nc.savech = make(chan I)
+	nc.halt = make(chan bool)
+	nc.finished = make(chan bool)
+	nc.directory = db.directory + "/" + name
+	nc.template = template
+	nc.fslock = lockfi
+	fs, err := LoadFileStore(nc.directory)
+	if err != nil {
+		fs, err = NewFileStore(nc.directory,1024,4096)
+		if err != nil {
+			panic(err)
+		}
+	}
+	nc.store = fs
+
+	nc.readStoredKeys()
+	go nc.syncRoutine()
+	return nc, nil
 }
 
 func (col *Collection) readStoredKeys() error {
@@ -59,11 +94,19 @@ func (col *Collection) cleanup() {
 		fmt.Println("Error writing key file!")
 	}
 	col.store.Close()
+	col.fslock.Close()
 }
 
 //Loads the value for the given key from the disk and caches it in memory
 func (col *Collection) cacheKey(id string) I {
 	fi := col.store.StoreForKey(id)
+
+	/*zip, err := gzip.NewReader(fi)
+	if err != nil {
+		//TODO: handle this error too
+		fmt.Println(err)
+		return nil
+	}*/
 
 	v := col.template.New()
 	dec := json.NewDecoder(fi)
@@ -77,6 +120,7 @@ func (col *Collection) cacheKey(id string) I {
 		fmt.Println("Decoding returned nil value...")
 	}
 	col.cache[id] = v
+	//zip.Close()
 	return v
 }
 
@@ -115,8 +159,10 @@ func (col *Collection) writeKeyFile() error {
 func (col *Collection) writeDoc(o I) error {
 	fi := col.store.StoreForKey(o.GetID())
 
+	//zip := gzip.NewWriter(fi)
 	enc := json.NewEncoder(fi)
 	err := enc.Encode(o)
+	//zip.Close()
 	return err
 }
 

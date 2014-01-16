@@ -4,12 +4,12 @@ import (
 	"os"
 	"fmt"
 	"testing"
+	"math/rand"
+	"runtime"
 	"runtime/pprof"
-	"crypto/rand"
-	orand "math/rand"
-	"encoding/base32"
 )
 
+var src string = "abcdefghijklmnopqrstuvwxyz1234567890"
 type MyObj struct {
 	Value string
 	Num int
@@ -28,16 +28,48 @@ func (o *MyObj) Equals(m *MyObj) bool {
 	return o.Value == m.Value && o.Num == m.Num && o.Contents == m.Contents
 }
 
+type MyObjJSON struct {
+	Value string
+	Num int
+	Contents string
+}
+
+func (o *MyObjJSON) GetID() string {
+	return o.Value
+}
+
+func (o *MyObjJSON) New() I {
+	return new(MyObjJSON)
+}
+
+func (o *MyObjJSON) Equals(m *MyObj) bool {
+	return o.Value == m.Value && o.Num == m.Num && o.Contents == m.Contents
+}
+
+func (o *MyObjJSON) MarshallJSON() ([]byte, error) {
+	return []byte("{\"Value\":\"" + o.Value + "\",Num:" + fmt.Sprint(o.Num) + ",Contents:\"" + o.Contents + "\"}"),nil
+}
+
 func RandString(size int) string {
 	b := make([]byte, size)
-	rand.Read(b)
-	return base32.StdEncoding.EncodeToString(b)[:size]
+	for i,_ := range b {
+		b[i] = src[rand.Intn(len(src))]
+	}
+	return string(b)
 }
 
 func RandObj() *MyObj {
 	o := new(MyObj)
 	o.Value = RandString(16)
-	o.Num = orand.Int()
+	o.Num = rand.Int()
+	o.Contents = RandString(2048)
+	return o
+}
+
+func RandObjJSON() *MyObjJSON {
+	o := new(MyObjJSON)
+	o.Value = RandString(16)
+	o.Num = rand.Int()
 	o.Contents = RandString(2048)
 	return o
 }
@@ -74,14 +106,16 @@ func TestMany(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	var list []*MyObj
+	for i := 0; i < 50000; i++ {
+		o := RandObj()
+		list = append(list, o)
+	}
 	pprof.StartCPUProfile(fi)
 	db := NewJadb("testData")
 	col := db.Collection("objects", new(MyObj))
-	var list []*MyObj
-	for i := 0; i < 5000; i++ {
-		o := RandObj()
-		col.Save(o)
-		list = append(list, o)
+	for _,v := range list {
+		col.Save(v)
 	}
 	db.Close()
 
@@ -111,6 +145,25 @@ func BenchmarkSaving(b *testing.B) {
 	}
 	db := NewJadb("testData")
 	col := db.Collection("objects", new(MyObj))
+	runtime.GC()
+	b.StartTimer()
+	for _,v := range objs {
+		col.Save(v)
+	}
+	db.Close()
+	b.StopTimer()
+	os.RemoveAll("testData")
+}
+
+func BenchmarkSavingWithMarshall(b *testing.B) {
+	b.StopTimer()
+	var objs []*MyObjJSON
+	for i := 0; i < b.N; i++ {
+		objs = append(objs, RandObjJSON())
+	}
+	db := NewJadb("testData")
+	col := db.Collection("objects", new(MyObjJSON))
+	runtime.GC()
 	b.StartTimer()
 	for _,v := range objs {
 		col.Save(v)
@@ -132,6 +185,7 @@ func BenchmarkReading(b *testing.B) {
 	dba.Close()
 	dba = NewJadb("testData")
 	objs = dba.Collection("objects", new(MyObj))
+	runtime.GC()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		s := fmt.Sprint(i)
