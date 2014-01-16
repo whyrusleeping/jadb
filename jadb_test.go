@@ -6,6 +6,7 @@ import (
 	"testing"
 	"math/rand"
 	"runtime/pprof"
+	"bytes"
 )
 
 var src string = "abcdefghijklmnopqrstuvwxyz1234567890"
@@ -27,6 +28,30 @@ func (o *MyObj) Equals(m *MyObj) bool {
 	return o.Value == m.Value && o.Num == m.Num && o.Contents == m.Contents
 }
 
+type MyObjJSON struct {
+	Value string
+	Num int
+	Contents string
+}
+
+func (o *MyObjJSON) GetID() string {
+	return o.Value
+}
+
+func (o *MyObjJSON) New() I {
+	return new(MyObjJSON)
+}
+
+func (o *MyObjJSON) Equals(m *MyObj) bool {
+	return o.Value == m.Value && o.Num == m.Num && o.Contents == m.Contents
+}
+
+func (o *MyObjJSON) MarshallJSON() ([]byte, error) {
+	buf := new(bytes.Buffer)
+	buf.WriteString(fmt.Sprintf("{\"Value\":\"%s\",Num:%d,Contents:\"%s\"}", o.Value, o.Num, o.Contents))
+	return buf.Bytes(),nil
+}
+
 func RandString(size int) string {
 	b := make([]byte, size)
 	for i,_ := range b {
@@ -37,6 +62,14 @@ func RandString(size int) string {
 
 func RandObj() *MyObj {
 	o := new(MyObj)
+	o.Value = RandString(16)
+	o.Num = rand.Int()
+	o.Contents = RandString(2048)
+	return o
+}
+
+func RandObjJSON() *MyObjJSON {
+	o := new(MyObjJSON)
 	o.Value = RandString(16)
 	o.Num = rand.Int()
 	o.Contents = RandString(2048)
@@ -76,7 +109,7 @@ func TestMany(t *testing.T) {
 		panic(err)
 	}
 	var list []*MyObj
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 5000; i++ {
 		o := RandObj()
 		list = append(list, o)
 	}
@@ -123,6 +156,23 @@ func BenchmarkSaving(b *testing.B) {
 	os.RemoveAll("testData")
 }
 
+func BenchmarkSavingWithMarshall(b *testing.B) {
+	b.StopTimer()
+	var objs []*MyObjJSON
+	for i := 0; i < b.N; i++ {
+		objs = append(objs, RandObjJSON())
+	}
+	db := NewJadb("testData")
+	col := db.Collection("objects", new(MyObjJSON))
+	b.StartTimer()
+	for _,v := range objs {
+		col.Save(v)
+	}
+	db.Close()
+	b.StopTimer()
+	os.RemoveAll("testData")
+}
+
 func BenchmarkReading(b *testing.B) {
 	b.StopTimer()
 	dba := NewJadb("testData")
@@ -130,6 +180,7 @@ func BenchmarkReading(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		o := RandObj()
 		o.Value = fmt.Sprintf("%d", i)
+		objs.Save(o)
 		objs.Save(o)
 	}
 	dba.Close()
