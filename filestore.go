@@ -4,7 +4,6 @@ import (
 	//"fmt"
 	"time"
 	"os"
-	"errors"
 	"encoding/json"
 	"io"
 )
@@ -79,16 +78,14 @@ func (fs *FileStore) Close() error {
 	return nil
 }
 
+//Write all cached blocks to the disk in a single pass
 func (fs *FileStore) writeCache() error {
-	//fmt.Println("writing cache!")
 	fs.fi.Seek(0,os.SEEK_SET)
 	skip := 0
 	for _,v := range fs.blocks {
 		if v == nil || v.cache == nil {
 			skip++
 		} else {
-			//fmt.Printf("Writing block: %d\n", i)
-			//fmt.Println(v.cache)
 			if skip > 0 {
 				fs.fi.Seek(int64(skip * fs.blocksize), os.SEEK_CUR)
 			}
@@ -101,6 +98,7 @@ func (fs *FileStore) writeCache() error {
 	return nil
 }
 
+//Return a struct containing FileStore metadata
 func (fs *FileStore) getIndexStruct() *indexFile {
 	fsdex := new(indexFile)
 	fsdex.Blocksize = fs.blocksize
@@ -144,6 +142,7 @@ func NewFileStore(dir string, blocksize, nblocks int) (*FileStore, error) {
 	return fs,nil
 }
 
+//Loads an existing filestore from the given directory
 func LoadFileStore(dir string) (*FileStore, error) {
 	index, err := os.Open(dir + "/index")
 	if err != nil {
@@ -174,7 +173,6 @@ func LoadFileStore(dir string) (*FileStore, error) {
 }
 
 func (fs *FileStore) getEmptyBlock() (int,error) {
-	//fmt.Println("getting new block")
 	for i := fs.lastfree; i < len(fs.freemap); i++ {
 		if !fs.freemap[i] {
 			fs.freemap[i] = true
@@ -191,7 +189,7 @@ func (fs *FileStore) getEmptyBlock() (int,error) {
 	return i,nil
 }
 
-func (fs *FileStore) StoreForKey(key string) *MemBlock {
+func (fs *FileStore) StoreForKey(key string) io.ReadWriter {
 	doc,ok := fs.objs[key]
 	if !ok {
 		doc = new(fsdoc)
@@ -204,13 +202,14 @@ func (fs *FileStore) StoreForKey(key string) *MemBlock {
 	return mb
 }
 
+//Expand the underlying file for this filestore.
 func (fs *FileStore) extend() error {
-	//fmt.Println("Extending mem block.")
 	cursize := int64(len(fs.freemap) * fs.blocksize)
 	_,err := fs.fi.Seek(cursize, os.SEEK_SET)
 	if err != nil {
 		return err
 	}
+	//TODO: Benchmark various methods of expanding this file
 	blockstogrow := len(fs.freemap) * 2
 	bytestogrow := blockstogrow * fs.blocksize
 	for blockstogrow < (1024 * 1024) {
@@ -223,14 +222,6 @@ func (fs *FileStore) extend() error {
 		//TODO: handle THIS better
 		return err
 	}
-	/*
-	for i := 0; i < bytestogrow / 4096; i++ {
-		_,err := fs.fi.Write(blank)
-		if err != nil {
-			//TODO: handle THIS better
-			return err
-		}
-	}*/
 	fs.freemap = append(fs.freemap, make([]bool, blockstogrow)...)
 	fs.blocks = append(fs.blocks, make([]*block, blockstogrow)...)
 	return nil
@@ -239,7 +230,7 @@ func (fs *FileStore) extend() error {
 func (fs *FileStore) DeleteKey(key string) error {
 	doc, ok := fs.objs[key]
 	if !ok {
-		return errors.New("Key not found!")
+		return &KeyNotFound{key}
 	}
 	for _,v := range doc.Blocks {
 		fs.freemap[v] = false
@@ -252,19 +243,15 @@ func (fs *FileStore) DeleteKey(key string) error {
 }
 
 func (fs *FileStore) writeBlock(bnum, offset int, b []byte) (int, error) {
-	//fmt.Printf("writing %d bytes in block %d offset %d\n", len(b), bnum, offset)
 	if fs.docaching {
 		blk := fs.blocks[bnum]
 		if blk == nil {
-			//fmt.Println("Doing things here...")
 			blk = new(block)
 			fs.blocks[bnum] = blk
 		}
 		if blk.cache == nil {
-			//fmt.Println("Allocating cache for block.")
 			blk.cache = make([]byte, fs.blocksize)
 		}
-		//fmt.Println(b)
 		copy(blk.cache[offset:], b)
 		return len(b),nil
 	} else {
@@ -278,7 +265,6 @@ func (fs *FileStore) writeBlock(bnum, offset int, b []byte) (int, error) {
 }
 
 func (fs *FileStore) readBlock(bnum, offset int, b []byte) (int, error) {
-	//fmt.Printf("reading %d bytes in block %d offset %d\n", len(b), bnum, offset)
 	if fs.docaching {
 		blk := fs.blocks[bnum]
 		if blk == nil {
@@ -286,18 +272,13 @@ func (fs *FileStore) readBlock(bnum, offset int, b []byte) (int, error) {
 			fs.blocks[bnum] = blk
 		}
 		if blk.cache == nil {
-			//fmt.Println("Nil cache block, reading from disk...")
 			blk.cache = make([]byte, fs.blocksize)
 			fs.fi.Seek(int64(bnum * fs.blocksize), os.SEEK_SET)
 			fs.fi.Read(blk.cache)
-			//fmt.Println(blk.cache)
 		}
-		//fmt.Printf("offset: %d\n", offset)
-		//fmt.Println(blk.cache[offset:])
 		copy(b,blk.cache[offset:])
 		return len(b),nil
 	} else {
-		//fmt.Println("Shouldnt be here...")
 		pos := int64((bnum * fs.blocksize) + offset)
 		_,err := fs.fi.Seek(pos, os.SEEK_SET)
 		if err != nil {
@@ -308,10 +289,9 @@ func (fs *FileStore) readBlock(bnum, offset int, b []byte) (int, error) {
 }
 
 func (fs *FileStore) readByteForKey(key string, offset int64, b []byte) (int,error) {
-	//fmt.Println("Read byte for key.")
 	doc, ok := fs.objs[key]
 	if !ok {
-		return 0, errors.New("Invalid store position!")
+		return 0, &KeyNotFound{key}
 	}
 	needend := offset + int64(len(b))
 	haveend := len(doc.Blocks) * fs.blocksize
@@ -324,21 +304,20 @@ func (fs *FileStore) readByteForKey(key string, offset int64, b []byte) (int,err
 	var read int
 	max := len(b)
 	for read < max {
-		//fmt.Printf("Entering read loop: [%d/%d]\n", read, len(b))
 		toread := fs.blocksize - ri
 		if len(b) < fs.blocksize - ri {
 			toread = len(b)
 		}
 		n, err := fs.readBlock(doc.Blocks[rblk], ri, b[:toread])
-		//fmt.Printf("Block read returned %d\n", n)
 		if err != nil {
 			return n+read,err
 		}
+
 		read += n
 		ri += n
 		b = b[toread:]
+
 		if ri == fs.blocksize {
-			//fmt.Println("Advanced block count.")
 			rblk++
 			ri = 0
 		}
@@ -357,7 +336,6 @@ func (fs *FileStore) writeBytesForKey(key string, offset int64, b []byte) (int,e
 	haveend := int64(len(d.Blocks) * fs.blocksize)
 	for needend > haveend {
 		i,err := fs.getEmptyBlock()
-		//fmt.Printf("Allocated block: %d\n", i)
 		if err != nil {
 			//TODO: probably not just return here
 			return 0,err
@@ -400,10 +378,9 @@ type MemBlock struct {
 }
 
 func (mb *MemBlock) Write(b []byte) (int, error) {
-	////fmt.Printf("Calling write for %d bytes.\n", len(b))
 	n, err := mb.in.writeBytesForKey(mb.key, mb.offset, b)
-	//fmt.Printf("writebytesforkey returned %d\n", n)
 	mb.offset += int64(n)
+	//Keep track of maximum file size
 	if mb.offset > mb.d.Size {
 		mb.d.Size = mb.offset
 	}
@@ -422,5 +399,13 @@ func (mb *MemBlock) Read(b []byte) (int, error) {
 	//fmt.Printf("readbyteforkey returned %d\n", n)
 	mb.offset += int64(n)
 	return n, err
+}
+
+type KeyNotFound struct {
+	Key string
+}
+
+func (knf *KeyNotFound) Error() string {
+	return "Key: " + knf.Key + " not found!"
 }
 

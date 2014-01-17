@@ -101,13 +101,6 @@ func (col *Collection) cleanup() {
 func (col *Collection) cacheKey(id string) I {
 	fi := col.store.StoreForKey(id)
 
-	/*zip, err := gzip.NewReader(fi)
-	if err != nil {
-		//TODO: handle this error too
-		fmt.Println(err)
-		return nil
-	}*/
-
 	v := col.template.New()
 	dec := json.NewDecoder(fi)
 	err := dec.Decode(v)
@@ -120,7 +113,6 @@ func (col *Collection) cacheKey(id string) I {
 		fmt.Println("Decoding returned nil value...")
 	}
 	col.cache[id] = v
-	//zip.Close()
 	return v
 }
 
@@ -169,7 +161,6 @@ func (col *Collection) writeDoc(o I) error {
 //Do all disk writes in a separate thread, and in the order
 //that they are queued. 
 func (col *Collection) syncRoutine() {
-	fmt.Println("Starting Sync Routine.")
 	for {
 		select {
 			case save := <-col.savech:
@@ -183,7 +174,6 @@ func (col *Collection) syncRoutine() {
 					continue
 				} else {
 					col.finished <-true
-					fmt.Println("Leaving Sync Routine.")
 					return
 				}
 		}
