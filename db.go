@@ -2,6 +2,12 @@ package jadb
 
 import (
 	"os"
+	"fmt"
+	"crypto/rand"
+	"crypto/md5"
+	"encoding/hex"
+	"io"
+	"time"
 )
 
 type I interface {
@@ -45,3 +51,11 @@ func (db *Jadb) Close() {
 	}
 }
 
+func GetUniqueID() string {
+	h := md5.New()
+	t := time.Now().UnixNano()
+	fmt.Fprintf(h, "time:%d", t)
+	io.CopyN(h, rand.Reader, 32)
+	out := h.Sum(nil)
+	return hex.EncodeToString(out)
+}
